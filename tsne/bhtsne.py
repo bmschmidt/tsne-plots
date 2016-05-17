@@ -2,7 +2,9 @@
 
 '''
 A simple Python wrapper for the bh_tsne binary that makes it easier to use it
-for TSV files in a pipeline without any shell script trickery.
+for binary files in a pipeline without any shell script trickery.
+
+Unlike the original BH-TSNE code, this runs on the binary-format input word2vec files.
 
 Note: The script does some minimal sanity checking of the input, but don't
     expect it to cover all cases. After all, it is a just a wrapper.
@@ -58,13 +60,61 @@ assert isfile(BH_TSNE_BIN_PATH), ('Unable to find the bh_tsne binary in the '
 # Default hyper-parameter values from van der Maaten (2014)
 # https://lvdmaaten.github.io/publications/papers/JMLR_2014.pdf (Experimental Setup, page 13)
 DEFAULT_NO_DIMS = 2
-INITIAL_DIMENSIONS = 50
+INITIAL_DIMENSIONS = 40
 DEFAULT_PERPLEXITY = 50
 DEFAULT_THETA = 0.5
 EMPTY_SEED = -1
 
 ###
 
+class Vector_file(object):
+    def __init__(self,filehandle):
+        self.fin = filehandle
+        self.preload_metadata()
+        
+    def preload_metadata(self):
+        
+        """
+        A simplified version of the gensim API: https://github.com/piskvorky/gensim/blob/develop/gensim/models/word2vec.py
+        """
+
+        binary=False,
+        encoding='utf8',
+        unicode_errors='strict'
+
+        counts = None
+        header = self.fin.readline()
+        self.vocab_size, self.vector_size = map(int, header.split())  # throws for invalid file format
+        self.remaining_words = self.vocab_size
+        
+    def __iter__(self):
+        return self
+    
+    def next(self):
+        """
+        For python2 compatibility
+        """
+        return self.__next__()
+    
+    def __next__(self):
+        """
+        Again, I'm using a stripped down version of the gensim code.
+        https://github.com/piskvorky/gensim/blob/develop/gensim/models/word2vec.py
+        """
+        fin = self.fin
+        binary_len = 4 * self.vector_size
+        word = []
+        while True:
+            ch = fin.read(1)
+            if ch == b' ':
+                break
+            if ch != b'\n':  # ignore newlines in front of words (some binary files have)
+                word.append(ch)
+        word = b''.join(word).decode("utf-8")
+        weights = np.fromstring(fin.read(binary_len), dtype='<f4')
+        return (word,weights)
+
+    
 def _argparse():
     argparse = ArgumentParser('bh_tsne Python wrapper')
     argparse.add_argument('-d', '--no_dims', type=int,
@@ -76,9 +126,11 @@ def _argparse():
     argparse.add_argument('-r', '--randseed', type=int, default=EMPTY_SEED)
     argparse.add_argument('-n', '--initial_dims', type=int, default=INITIAL_DIMENSIONS)
     argparse.add_argument('-v', '--verbose', action='store_true')
-    argparse.add_argument('-i', '--input', type=FileType('r'), default=stdin)
-    argparse.add_argument('-o', '--output', type=FileType('w'),
-            default=stdout)
+    argparse.add_argument('-i', '--input', type=FileType('r'), default=stdin, help="File to read in")
+    argparse.add_argument('-o', '--output', type=FileType('w'),default=stdout,help="File to output to")
+    argparse.add_argument('--id-file', type=FileType('w'), default=stderr,help="File to output id list to")
+    argparse.add_argument('-x', '--max_rows', type=float,default=float("Inf"),help="Stop reading after this many rows")
+    argparse.add_argument('--normalize', action="store_true",help="Normalize vectors to unit length, so that magnitude doesn't matter?")
     return argparse
 
 
@@ -163,12 +215,29 @@ def bh_tsne(samples, no_dims=DEFAULT_NO_DIMS, initial_dims=INITIAL_DIMENSIONS, p
 
 def main(args):
     argp = _argparse().parse_args(args[1:])
-
+    
     # Read the data, with some sanity checking
     data = []
-    for sample_line_num, sample_line in enumerate((l.rstrip('\n')
-            for l in argp.input), start=1):
-        sample_data = sample_line.split('\t')
+    ids = []
+    
+    if argp.input.name.endswith(".bin"):
+        """
+        Here it knows how to read word2vec format.
+        """
+        dtype = "binary"
+        iterable = Vector_file(argp.input)
+    else:
+        dtype = "text"
+        iterable = (l.rstrip('\n') for l in argp.input)
+
+    for sample_line_num, sample_line in enumerate(iterable, start=1):
+        if dtype == "text":
+            sample_data = sample_line.split()
+            ids.append(sample_data[0])
+            del(sample_data[0])
+        if dtype=="binary":
+            sample_data = sample_line[1]
+            ids.append(sample_line[0])
         try:
             assert len(sample_data) == dims, ('Input line #{} of '
                     'dimensionality {} although we have previously observed '
@@ -178,8 +247,17 @@ def main(args):
         except NameError:
             # First line, record the dimensionality
             dims = len(sample_data)
+        if argp.normalize:
+            sample_data = sample_data/np.linalg.norm(sample_data)
         data.append([float(e) for e in sample_data])
-
+        if sample_line_num >= argp.max_rows:
+            break
+    for id in ids:
+        """
+        Store the ids.
+        """
+        argp.id_file.write(id.encode("utf-8") + "\n")
+    return 
     for result in bh_tsne(data, no_dims=argp.no_dims, perplexity=argp.perplexity, theta=argp.theta, randseed=argp.randseed,
             verbose=argp.verbose, initial_dims=argp.initial_dims):
         fmt = ''
