@@ -226,6 +226,8 @@ def main(args):
         """
         dtype = "binary"
         iterable = Vector_file(argp.input)
+        # This shouldn't be necessary: I'm zero-indexing wrong somewhere.
+        argp.max_rows = iterable.vocab_size
     else:
         dtype = "text"
         iterable = (l.rstrip('\n') for l in argp.input)
@@ -257,7 +259,6 @@ def main(args):
         Store the ids.
         """
         argp.id_file.write(id.encode("utf-8") + "\n")
-    return 
     for result in bh_tsne(data, no_dims=argp.no_dims, perplexity=argp.perplexity, theta=argp.theta, randseed=argp.randseed,
             verbose=argp.verbose, initial_dims=argp.initial_dims):
         fmt = ''
