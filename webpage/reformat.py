@@ -4,14 +4,7 @@ import math
 import os
 from argparse import ArgumentParser
 import logging
-
-def return_bookid_lookup():
-    bookids = dict()
-    for line in open("/drobo/bookids.txt"):
-        line = line.rstrip("\n")
-        (bookid,hathid) = line.split("\t")
-        bookids[bookid] = hathid
-    return bookids
+import shutil
 
 def get_bounds(filename):
     xlim = [float("inf"),float("-inf")]
@@ -45,6 +38,8 @@ def rescale(value,lims,modulo):
 class Datatiler(object):
     def __init__(self,tile_width,max,xlim,ylim,headers = ["x","y","id"]):
         self.reset(tile_width=tile_width,max=max,xlim=xlim,ylim=ylim,headers=headers)
+        shutil.rmtree('tiles')
+
 
     def reset(self,tile_width,max,xlim,ylim,headers = ["x","y","id"]):
         """"
@@ -65,9 +60,14 @@ class Datatiler(object):
         if (x,y) in self.files:
             return self.files[(x,y)]
         dir = "/".join(map(str,["tiles",self.tile_width, x]))
+        filename = "%s/%i.tsv"%(dir,y)
+        if os.path.exists(filename):
+            # When already created, append.
+            self.files[(x,y)] = open(filename,"a")
+            return self.files[(x,y)]
         if not os.path.exists(dir):
             os.makedirs(dir)
-        self.files[(x,y)] = open("%s/%i.tsv"%(dir,y), "w")
+        self.files[(x,y)] = open(filename, "w")
         # Write the headers
         self.files[(x,y)].write("\t".join(self.headers) + "\n")
         return self.files[(x,y)]
@@ -78,14 +78,24 @@ class Datatiler(object):
                 rows = self.data[(x,y)]
             except KeyError:
                 continue
-            file = self.return_file(x,y)
+            try:
+                file = self.return_file(x,y)
+            except IOError as e:
+                if "Errno 24" in str(e):
+                    # If it's full, close all the files and try again.
+                    self.close_files()
+                    self.flush()
+                    return
+                else:
+                    raise
             for row in rows:
                 file.write("\t".join(row) + "\n")
             del self.data[(x,y)]
             
     def close_files(self):
-        for key,file in self.files.iteritems():
-            file.close()
+        for key in self.files.keys():
+            self.files[key].close()
+            del self.files[key]
 
     def subdivide(self):
         self.flush()
