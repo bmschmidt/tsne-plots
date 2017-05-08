@@ -9,20 +9,20 @@
 }
 
 </style>
-
 <body>
 <div id="page">
 <div id="desc" style="position:absolute;width:50%;left:50%;z-index:3">
 
-  <h3>Bias in word embeddings</h3>
+  <h3><text style="color:red"
+  onclick="d3.select('#desc').remove()">-close-</text>  Bias in word embeddings</h3>
   This is a prototype plot of a way to visualize bias in large word embedding models, using
   14 million reviews from RateMyProfessors.
   Words are colorized by how strongly they mirror two vectors in their model; one approximately
   "quality" or "goodness", the other distinguishing "male" from "female."
   Use the dropdown to switch views, zoom using the mouse or trackpad or whatever, or type a word
   into the search box to zoom directly to it.
-
 </div>
+
 <div id="buttons" style="z-index:2;position:absolute">
 </div>
 <div id=container style="position:absolute;top:0;left:0;z-index:1" ></div>
